@@ -8,6 +8,13 @@
         "--access-token",
         "sbp_f45077694e06491fd593ecf426f5f49bcf998d5f"
       ]
+    },
+      "XcodeBuildMCP": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "xcodebuildmcp@latest"
+      ]
     }
   }
 }

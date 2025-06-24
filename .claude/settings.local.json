@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__XcodeBuildMCP__build_mac_proj",
+      "mcp__XcodeBuildMCP__launch_mac_app",
+      "Bash(cp:*)",
+      "Bash(find:*)",
+      "mcp__zen__thinkdeep",
+      "Bash(ls:*)",
+      "Bash(grep:*)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "supabase",
+    "XcodeBuildMCP"
+  ]
+}

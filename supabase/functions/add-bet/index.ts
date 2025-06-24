@@ -13,8 +13,8 @@ serve(async (req) => {
 
   try {
     // Parse request body
-    const body: AddBetRequest = await req.json()
-    const { screenshot, participants_text } = body
+    const body = await req.json()
+    const { screenshot, participants_text, who_paid, bet_data_override } = body
 
     if (!screenshot || !participants_text) {
       throw new Error('Missing required fields: screenshot and participants_text')
@@ -26,17 +26,60 @@ serve(async (req) => {
       throw new Error('Missing authorization header')
     }
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(
+    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser(
       authHeader.replace('Bearer ', '')
     )
 
-    if (authError || !user) {
+    if (authError || !authUser) {
       throw new Error('Unauthorized')
     }
 
-    // Parse bet data from screenshot
-    console.log('Parsing bet screenshot...')
-    const betData = await parseBetScreenshot(screenshot)
+    // Get bet data - either from override or by parsing screenshot
+    let betData
+    if (bet_data_override) {
+      console.log('Using override bet data from client...')
+      betData = bet_data_override
+    } else {
+      console.log('Parsing bet screenshot...')
+      betData = await parseBetScreenshot(screenshot)
+    }
+    console.log('Bet data:', JSON.stringify(betData, null, 2))
+    
+    // Normalize status to valid values
+    const validStatuses = ['pending', 'won', 'lost', 'void', 'push']
+    const statusLower = betData.status.toLowerCase()
+    
+    if (statusLower.includes('win') || statusLower.includes('won')) {
+      betData.status = 'won'
+    } else if (statusLower.includes('loss') || statusLower.includes('lost')) {
+      betData.status = 'lost'
+    } else if (statusLower.includes('void')) {
+      betData.status = 'void'
+    } else if (statusLower.includes('push')) {
+      betData.status = 'push'
+    } else if (!validStatuses.includes(betData.status)) {
+      console.log(`Invalid status "${betData.status}", defaulting to "pending"`)
+      betData.status = 'pending'
+    }
+    
+    // Normalize bet type to valid values
+    const validTypes = ['straight', 'parlay', 'teaser', 'round_robin', 'futures']
+    const typeLower = betData.type.toLowerCase()
+    
+    if (typeLower.includes('single') || typeLower.includes('straight')) {
+      betData.type = 'straight'
+    } else if (typeLower.includes('parlay')) {
+      betData.type = 'parlay'
+    } else if (typeLower.includes('teaser')) {
+      betData.type = 'teaser'
+    } else if (typeLower.includes('round') || typeLower.includes('robin')) {
+      betData.type = 'round_robin'
+    } else if (typeLower.includes('future')) {
+      betData.type = 'futures'
+    } else if (!validTypes.includes(betData.type)) {
+      console.log(`Invalid type "${betData.type}", defaulting to "straight"`)
+      betData.type = 'straight'
+    }
 
     // Parse participants
     console.log('Parsing participants...')
@@ -75,8 +118,9 @@ serve(async (req) => {
         risk: betData.risk,
         to_win: betData.to_win,
         odds: betData.odds,
-        created_by: user.id,
-        screenshot_url: screenshot // In production, upload to storage first
+        created_by: authUser.id,
+        screenshot_url: screenshot, // In production, upload to storage first
+        settled_at: betData.status !== 'pending' ? new Date().toISOString() : null
       }])
       .select()
       .single()
@@ -86,7 +130,7 @@ serve(async (req) => {
     }
 
     // Create bet legs for parlays
-    if (betData.legs.length > 0) {
+    if (betData.legs && betData.legs.length > 0) {
       const legs = betData.legs.map(leg => ({
         bet_id: bet.id,
         event: leg.event,
@@ -104,14 +148,38 @@ serve(async (req) => {
       }
     }
 
+    // Determine who paid for the bet
+    let payerUserId = authUser.id // Default to authenticated user
+    
+    if (who_paid) {
+      // Find the user who paid by name
+      const { data: payerUser, error: payerError } = await getOrCreateParticipant(who_paid)
+      if (payerError) {
+        throw new Error(`Failed to find payer ${who_paid}: ${payerError.message}`)
+      }
+      payerUserId = payerUser.id
+    }
+
     // Create bet participants
-    const betParticipants = participantUsers.map(({ user, stake }) => ({
-      bet_id: bet.id,
-      user_id: user.id,
-      stake: stake,
-      payout_due: 0, // Will be calculated when bet settles
-      is_paid: false
-    }))
+    // Logic: Use specified payer, or default to authenticated user for multiple participants
+    const betParticipants = participantUsers.map(({ user, stake }) => {
+      // Calculate payout_due for won bets
+      let payoutDue = 0
+      if (bet.status === 'won') {
+        // Calculate proportional winnings
+        const stakeRatio = stake / bet.risk
+        payoutDue = bet.to_win * stakeRatio
+      }
+      
+      return {
+        bet_id: bet.id,
+        user_id: user.id,
+        stake: stake,
+        payout_due: payoutDue,
+        is_paid: false,
+        who_paid_for: participants.length > 1 ? payerUserId : user.id // If multiple participants: use specified payer, if single: they paid for themselves
+      }
+    })
 
     const { error: participantsError } = await supabase
       .from('bet_participants')

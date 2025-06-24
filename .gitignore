@@ -55,3 +55,10 @@ yarn-error.log*
 .idea/
 *.swp
 *.swo
+# Temporary files
+export-*.csv
+admin-link.js
+setup-users.js
+test-bets.js
+test/
+macos/BetTracker_backup/

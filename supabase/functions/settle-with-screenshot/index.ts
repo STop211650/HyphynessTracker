@@ -1,7 +1,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { corsHeaders } from '../_shared/cors.ts'
 import { supabase } from '../_shared/supabase.ts'
-// Removed unused imports
+import { parseBetScreenshot } from '../_shared/vision.ts'
+import { BetData } from '../_shared/types.ts'
 
 serve(async (req) => {
   // Handle CORS
@@ -12,15 +13,10 @@ serve(async (req) => {
   try {
     // Parse request body
     const body = await req.json()
-    const { bet_id, status } = body
+    const { screenshot, bet_id } = body
 
-    if (!bet_id || !status) {
-      throw new Error('Missing required fields: bet_id, status')
-    }
-    
-    // Validate status
-    if (!['won', 'lost', 'void', 'push'].includes(status)) {
-      throw new Error('Invalid status. Must be: won, lost, void, or push')
+    if (!screenshot || !bet_id) {
+      throw new Error('Missing required fields: screenshot, bet_id')
     }
 
     // Get authenticated user
@@ -35,6 +31,16 @@ serve(async (req) => {
 
     if (authError || !user) {
       throw new Error('Unauthorized')
+    }
+
+    // Parse the settlement screenshot
+    console.log('Parsing settlement screenshot...')
+    const parsedData = await parseBetScreenshot(screenshot)
+    console.log('Parsed settlement data:', JSON.stringify(parsedData, null, 2))
+
+    // Verify it's a settled bet
+    if (!parsedData.status || parsedData.status === 'pending') {
+      throw new Error('Screenshot does not show a settled bet')
     }
 
     // Find the bet by ID
@@ -68,12 +74,19 @@ serve(async (req) => {
       throw new Error(`Bet is already settled with status: ${bet.status}`)
     }
 
-    // Update bet status (trigger will handle payout calculations)
+    // Verify ticket number match if available
+    if (parsedData.ticket_number && bet.ticket_number && 
+        parsedData.ticket_number !== bet.ticket_number) {
+      throw new Error('Ticket number mismatch. This screenshot does not match the selected bet.')
+    }
+
+    // Update bet status with screenshot proof
     const { data: updatedBet, error: updateError } = await supabase
       .from('bets')
       .update({
-        status: status,
-        settled_at: new Date().toISOString()
+        status: parsedData.status,
+        settled_at: new Date().toISOString(),
+        settlement_screenshot: screenshot // Store proof
       })
       .eq('id', bet.id)
       .select(`
@@ -134,7 +147,7 @@ serve(async (req) => {
     )
 
   } catch (error) {
-    console.error('Error in settle-bet function:', error)
+    console.error('Error in settle-with-screenshot function:', error)
     return new Response(
       JSON.stringify({
         success: false,

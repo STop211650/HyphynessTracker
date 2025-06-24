@@ -29,6 +29,7 @@ export interface Participant {
 export interface AddBetRequest {
   screenshot: string; // base64 encoded
   participants_text: string; // e.g. "Sam: 50, Alex: 30, Jordan: 20"
+  who_paid?: string; // Optional: name of person who paid for the bet
 }
 
 export interface SettleBetRequest {
