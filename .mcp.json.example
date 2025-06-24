@@ -6,10 +6,10 @@
         "-y",
         "@supabase/mcp-server-supabase@latest",
         "--access-token",
-        "sbp_f45077694e06491fd593ecf426f5f49bcf998d5f"
+        "YOUR_SUPABASE_ACCESS_TOKEN_HERE"
       ]
     },
-      "XcodeBuildMCP": {
+    "XcodeBuildMCP": {
       "command": "npx",
       "args": [
         "-y",

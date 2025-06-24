@@ -25,6 +25,7 @@ dist/
 .env.development.local
 .env.test.local
 .env.production.local
+.mcp.json
 
 # Debug
 npm-debug.log*
@@ -40,6 +41,7 @@ yarn-error.log*
 
 # Supabase
 .supabase/
+supabase/.temp/
 
 # macOS
 *.app
