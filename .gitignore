@@ -45,16 +45,26 @@ yarn-error.log*
 *.app
 *.dmg
 
-# iOS
-*.ipa
-*.dSYM.zip
-*.dSYM
-
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+
+# Xcode
+*.xcuserstate
+*.xcuserdatad/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.xcbkptlist
+*.moved-aside
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
 # Temporary files
 export-*.csv
 admin-link.js
