@@ -3,14 +3,29 @@ import Foundation
 class SupabaseClient {
     static let shared = SupabaseClient()
     
-    private let baseURL = "https://anxncoikpbipuplrkqrd.supabase.co"
-    private let anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFueG5jb2lrcGJpcHVwbHJrcXJkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk3ODY1OTMsImV4cCI6MjA2NTM2MjU5M30.gMAaJ1h7ZmiSbaInhNgYNCsJhLj8SljiawkDyWlYrGQ"
+    private var baseURL: String { Config.supabaseURL }
+    private var anonKey: String { Config.supabaseAnonKey }
     
     private init() {}
     
+    // Handle API response and check for authentication errors
+    private func handleResponse(_ response: URLResponse?) throws {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SupabaseError.networkError
+        }
+        
+        // Check for unauthorized status
+        if httpResponse.statusCode == 401 {
+            // Token expired or invalid, sign out user
+            AuthenticationManager.shared.signOut()
+            throw SupabaseError.notAuthenticated
+        }
+    }
+    
     // Add a bet
     func addBet(screenshot: String, participantsText: String, whoPaid: String? = nil, betData: BetData? = nil) async throws -> AddBetResponse {
-        guard let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
+        guard AuthenticationManager.shared.validateStoredToken(),
+              let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
             throw SupabaseError.notAuthenticated
         }
         
@@ -45,12 +60,20 @@ class SupabaseClient {
         
         let (data, response) = try await URLSession.shared.data(for: request)
         
+        try handleResponse(response)
+        
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SupabaseError.networkError
         }
         
         if httpResponse.statusCode == 200 {
             return try JSONDecoder().decode(AddBetResponse.self, from: data)
+        } else if httpResponse.statusCode == 409 {
+            // Handle duplicate bet error
+            if let duplicateResponse = try? JSONDecoder().decode(DuplicateBetResponse.self, from: data) {
+                throw SupabaseError.duplicateBet(ticketNumber: duplicateResponse.ticket_number ?? "Unknown")
+            }
+            throw SupabaseError.apiError("Duplicate bet detected")
         } else {
             if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
                 throw SupabaseError.apiError(errorResponse.error)
@@ -61,7 +84,8 @@ class SupabaseClient {
     
     // Parse bet screenshot using vision API
     func parseBetScreenshot(_ base64Image: String) async throws -> BetData {
-        guard let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
+        guard AuthenticationManager.shared.validateStoredToken(),
+              let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
             print("SupabaseClient: No auth token found")
             throw SupabaseError.notAuthenticated
         }
@@ -78,6 +102,8 @@ class SupabaseClient {
         request.httpBody = try JSONEncoder().encode(body)
         
         let (data, response) = try await URLSession.shared.data(for: request)
+        
+        try handleResponse(response)
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SupabaseError.networkError
@@ -103,7 +129,7 @@ class SupabaseClient {
                             event: leg.event,
                             market: leg.market,
                             selection: leg.selection,
-                            odds: leg.odds
+                            odds: leg.odds ?? ""
                         )
                     }
                 )
@@ -141,7 +167,8 @@ class SupabaseClient {
     
     // Find matching pending bets
     func findMatchingBets(betData: BetData, ticketNumber: String? = nil) async throws -> [BetMatch] {
-        guard let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
+        guard AuthenticationManager.shared.validateStoredToken(),
+              let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
             throw SupabaseError.notAuthenticated
         }
         
@@ -161,16 +188,25 @@ class SupabaseClient {
         
         let (data, response) = try await URLSession.shared.data(for: request)
         
+        try handleResponse(response)
+        
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SupabaseError.networkError
         }
         
         if httpResponse.statusCode == 200 {
-            let matchResponse = try JSONDecoder().decode(FindMatchingBetResponse.self, from: data)
-            if matchResponse.success {
-                return matchResponse.matches ?? []
-            } else {
-                throw SupabaseError.apiError(matchResponse.error ?? "Failed to find matching bets")
+            do {
+                let matchResponse = try JSONDecoder().decode(FindMatchingBetResponse.self, from: data)
+                if matchResponse.success {
+                    return matchResponse.matches ?? []
+                } else {
+                    throw SupabaseError.apiError(matchResponse.error ?? "Failed to find matching bets")
+                }
+            } catch {
+                print("SupabaseClient: Failed to decode FindMatchingBetResponse")
+                print("SupabaseClient: Raw response: \(String(data: data, encoding: .utf8) ?? "nil")")
+                print("SupabaseClient: Error: \(error)")
+                throw error
             }
         } else {
             throw SupabaseError.unknownError(statusCode: httpResponse.statusCode)
@@ -179,7 +215,8 @@ class SupabaseClient {
     
     // Settle a bet with screenshot proof
     func settleBetWithScreenshot(betId: String, screenshot: String) async throws -> SettlementSummary {
-        guard let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
+        guard AuthenticationManager.shared.validateStoredToken(),
+              let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
             throw SupabaseError.notAuthenticated
         }
         
@@ -198,6 +235,8 @@ class SupabaseClient {
         request.httpBody = try JSONEncoder().encode(body)
         
         let (data, response) = try await URLSession.shared.data(for: request)
+        
+        try handleResponse(response)
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SupabaseError.networkError
@@ -219,13 +258,19 @@ class SupabaseClient {
                 throw SupabaseError.apiError(settleResponse.error ?? "Failed to settle bet")
             }
         } else {
+            // Try to decode error response
+            if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                print("SupabaseClient: settleBetWithScreenshot error: \(errorResponse.error)")
+                throw SupabaseError.apiError(errorResponse.error)
+            }
             throw SupabaseError.unknownError(statusCode: httpResponse.statusCode)
         }
     }
     
     // Settle a bet
     func settleBet(betId: String, status: String) async throws -> SettlementSummary {
-        guard let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
+        guard AuthenticationManager.shared.validateStoredToken(),
+              let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
             throw SupabaseError.notAuthenticated
         }
         
@@ -240,6 +285,8 @@ class SupabaseClient {
         request.httpBody = try JSONEncoder().encode(body)
         
         let (data, response) = try await URLSession.shared.data(for: request)
+        
+        try handleResponse(response)
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SupabaseError.networkError
@@ -270,7 +317,8 @@ class SupabaseClient {
     
     // Get active bets for the user
     func getActiveBets() async throws -> [ActiveBet] {
-        guard let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
+        guard AuthenticationManager.shared.validateStoredToken(),
+              let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
             throw SupabaseError.notAuthenticated
         }
         
@@ -281,6 +329,8 @@ class SupabaseClient {
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
         
         let (data, response) = try await URLSession.shared.data(for: request)
+        
+        try handleResponse(response)
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SupabaseError.networkError
@@ -311,6 +361,56 @@ class SupabaseClient {
                 throw SupabaseError.apiError(betsResponse.error ?? "Failed to get active bets")
             }
         } else {
+            throw SupabaseError.unknownError(statusCode: httpResponse.statusCode)
+        }
+    }
+    
+    // Record a payment between users
+    func recordPayment(fromUserName: String, toUserName: String, amount: Double, paymentMethod: String? = nil, note: String? = nil) async throws -> RecordPaymentResponse {
+        guard AuthenticationManager.shared.validateStoredToken(),
+              let authToken = AuthenticationManager.shared.getStoredAuthToken() else {
+            throw SupabaseError.notAuthenticated
+        }
+        
+        // For now, we'll pass an empty bet_id since the user wants simple balance updates
+        // In the future, this could be enhanced to link to specific bets
+        let url = URL(string: "\(baseURL)/functions/v1/record-payment")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        
+        let requestBody = RecordPaymentRequest(
+            bet_id: "", // Empty for general payments
+            from_user_name: fromUserName,
+            to_user_name: toUserName,
+            amount: amount,
+            payment_method: paymentMethod,
+            note: note
+        )
+        
+        request.httpBody = try JSONEncoder().encode(requestBody)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        try handleResponse(response)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SupabaseError.networkError
+        }
+        
+        if httpResponse.statusCode == 200 {
+            let paymentResponse = try JSONDecoder().decode(RecordPaymentResponse.self, from: data)
+            if paymentResponse.success {
+                return paymentResponse
+            } else {
+                throw SupabaseError.apiError(paymentResponse.error ?? "Failed to record payment")
+            }
+        } else {
+            if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                throw SupabaseError.apiError(errorResponse.error)
+            }
             throw SupabaseError.unknownError(statusCode: httpResponse.statusCode)
         }
     }
@@ -358,6 +458,13 @@ struct ParticipantInfo: Codable {
 struct ErrorResponse: Codable {
     let success: Bool
     let error: String
+}
+
+struct DuplicateBetResponse: Codable {
+    let success: Bool
+    let error: String
+    let isDuplicate: Bool?
+    let ticket_number: String?
 }
 
 struct ParseBetResponse: Codable {
@@ -452,7 +559,7 @@ struct BetMatch: Codable {
     let id: String
     let confidence: Int
     let bet_data: BetData
-    let created_at: String
+    let created_at: String?
 }
 
 // Settle with screenshot models
@@ -461,10 +568,49 @@ struct SettleWithScreenshotRequest: Codable {
     let bet_id: String
 }
 
+// Payment models
+struct RecordPaymentRequest: Codable {
+    let bet_id: String
+    let from_user_name: String
+    let to_user_name: String
+    let amount: Double
+    let payment_method: String?
+    let note: String?
+}
+
+struct RecordPaymentResponse: Codable {
+    let success: Bool
+    let payment: PaymentInfo?
+    let error: String?
+}
+
+struct PaymentInfo: Codable {
+    let id: String
+    let bet_id: String
+    let from: String
+    let to: String
+    let amount: Double
+    let payment_method: String?
+    let paid_at: String
+    let net_effect: NetEffect
+}
+
+struct NetEffect: Codable {
+    let from_user: UserBalanceChange
+    let to_user: UserBalanceChange
+}
+
+struct UserBalanceChange: Codable {
+    let name: String
+    let balance_change: Double
+    let new_outstanding: Double
+}
+
 enum SupabaseError: LocalizedError {
     case notAuthenticated
     case networkError
     case apiError(String)
+    case duplicateBet(ticketNumber: String)
     case unknownError(statusCode: Int)
     
     var errorDescription: String? {
@@ -475,6 +621,8 @@ enum SupabaseError: LocalizedError {
             return "Network error. Please check your connection."
         case .apiError(let message):
             return message
+        case .duplicateBet(let ticketNumber):
+            return "This bet has already been recorded\n\nTicket: \(ticketNumber)"
         case .unknownError(let code):
             return "Server error (code: \(code))"
         }

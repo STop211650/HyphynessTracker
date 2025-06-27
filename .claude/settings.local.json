@@ -7,7 +7,13 @@
       "Bash(find:*)",
       "mcp__zen__thinkdeep",
       "Bash(ls:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(xcodebuild:*)",
+      "mcp__XcodeBuildMCP__build_run_mac_proj",
+      "mcp__supabase__get_logs",
+      "mcp__supabase__list_edge_functions",
+      "Bash(supabase functions logs:*)",
+      "Bash(supabase functions:*)"
     ]
   },
   "enabledMcpjsonServers": [

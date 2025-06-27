@@ -119,15 +119,92 @@ class ParticipantParser {
     private static func parseCustomAmounts(_ input: String) -> [ParsedParticipant] {
         var participants: [ParsedParticipant] = []
         
-        // Split by commas first
-        let components = input.components(separatedBy: ",")
-        
-        for component in components {
-            let trimmed = component.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Check if input contains commas
+        if input.contains(",") {
+            // Split by commas first (traditional format)
+            let components = input.components(separatedBy: ",")
             
-            // Try different patterns to extract name and amount
-            if let participant = parseNameAmountPair(trimmed) {
-                participants.append(participant)
+            for component in components {
+                let trimmed = component.trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                // Try different patterns to extract name and amount
+                if let participant = parseNameAmountPair(trimmed) {
+                    participants.append(participant)
+                }
+            }
+        } else {
+            // No commas found, try to parse space-separated format
+            participants = parseSpaceSeparatedAmounts(input)
+        }
+        
+        return participants
+    }
+    
+    // Parse space-separated format without commas (e.g., "Greg 50 Shyam 100")
+    private static func parseSpaceSeparatedAmounts(_ input: String) -> [ParsedParticipant] {
+        var participants: [ParsedParticipant] = []
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Use regex to find patterns of text followed by numbers
+        let pattern = #"([A-Za-z]+(?:\s+[A-Za-z]+)*)\s+(\$?\d+(?:\.\d{1,2})?)"#
+        
+        do {
+            let regex = try NSRegularExpression(pattern: pattern, options: [])
+            let matches = regex.matches(in: trimmed, options: [], range: NSRange(trimmed.startIndex..., in: trimmed))
+            
+            for match in matches {
+                if match.numberOfRanges == 3 {
+                    // Extract name (group 1)
+                    if let nameRange = Range(match.range(at: 1), in: trimmed) {
+                        let name = String(trimmed[nameRange]).trimmingCharacters(in: .whitespaces)
+                        
+                        // Extract amount (group 2)
+                        if let amountRange = Range(match.range(at: 2), in: trimmed) {
+                            let amountStr = String(trimmed[amountRange])
+                            if let amount = extractAmount(from: amountStr) {
+                                participants.append(ParsedParticipant(name: name, stake: amount))
+                            }
+                        }
+                    }
+                }
+            }
+        } catch {
+            // If regex fails, fall back to simple word-by-word parsing
+            participants = parseSpaceSeparatedFallback(trimmed)
+        }
+        
+        return participants
+    }
+    
+    // Fallback parsing for space-separated format
+    private static func parseSpaceSeparatedFallback(_ input: String) -> [ParsedParticipant] {
+        var participants: [ParsedParticipant] = []
+        let words = input.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+        
+        var i = 0
+        while i < words.count {
+            var nameComponents: [String] = []
+            
+            // Collect name components until we find a number
+            while i < words.count {
+                if let _ = extractAmount(from: words[i]) {
+                    // Found amount
+                    break
+                }
+                nameComponents.append(words[i])
+                i += 1
+            }
+            
+            // If we have a name and there's still an amount to read
+            if !nameComponents.isEmpty && i < words.count {
+                let name = nameComponents.joined(separator: " ")
+                if let amount = extractAmount(from: words[i]) {
+                    participants.append(ParsedParticipant(name: name, stake: amount))
+                    i += 1
+                }
+            } else {
+                // Move to next word if we couldn't parse
+                i += 1
             }
         }
         

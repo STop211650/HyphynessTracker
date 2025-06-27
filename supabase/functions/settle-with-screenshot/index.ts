@@ -1,10 +1,12 @@
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+// Setup type definitions for built-in Supabase Runtime APIs
+import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+
 import { corsHeaders } from '../_shared/cors.ts'
 import { supabase } from '../_shared/supabase.ts'
 import { parseBetScreenshot } from '../_shared/vision.ts'
 import { BetData } from '../_shared/types.ts'
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   // Handle CORS
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -89,22 +91,32 @@ serve(async (req) => {
         settlement_screenshot: screenshot // Store proof
       })
       .eq('id', bet.id)
-      .select(`
-        *,
-        bet_participants (
-          user_id,
-          stake,
-          payout_due,
-          users (
-            name
-          )
-        )
-      `)
+      .select('*')
       .single()
 
     if (updateError) {
       throw new Error(`Failed to update bet: ${updateError.message}`)
     }
+
+    // Separately fetch participants with user details
+    const { data: participants, error: participantsError } = await supabase
+      .from('bet_participants')
+      .select(`
+        user_id,
+        stake,
+        payout_due,
+        user:users!bet_participants_user_id_fkey (
+          name
+        )
+      `)
+      .eq('bet_id', bet.id)
+
+    if (participantsError) {
+      throw new Error(`Failed to fetch participants: ${participantsError.message}`)
+    }
+
+    // Attach participants to the bet object
+    updatedBet.bet_participants = participants
 
     // Calculate summary
     const totalPayout = updatedBet.bet_participants.reduce(
@@ -115,14 +127,14 @@ serve(async (req) => {
     const winners = updatedBet.bet_participants
       .filter((p: any) => p.payout_due > p.stake)
       .map((p: any) => ({
-        name: p.users.name,
+        name: p.user?.name || 'Unknown',
         profit: p.payout_due - p.stake
       }))
 
     const losers = updatedBet.bet_participants
       .filter((p: any) => p.payout_due < p.stake)
       .map((p: any) => ({
-        name: p.users.name,
+        name: p.user?.name || 'Unknown',
         loss: p.stake - p.payout_due
       }))
 

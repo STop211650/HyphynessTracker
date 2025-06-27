@@ -24,27 +24,30 @@ export async function parseBetScreenshot(base64Image: string): Promise<BetData> 
       messages: [
         {
           role: 'user',
-          content: `Parse this bet slip text and extract bet information. Return JSON only.
+          content: `Parse this bet slip text and extract bet information. Return ONLY valid JSON with no additional text, explanation, or markdown formatting.
 
 Text from bet slip:
 ${extractedText}
 
-IMPORTANT: Use the odds to determine which amount is risked vs potential winnings:
-- For negative odds (e.g., -180): The larger amount is the risk, smaller is the potential win
-  Example: With -180 odds, risking $360 wins $200 (not the other way around)
-- For positive odds (e.g., +150): The smaller amount is the risk, larger is the potential win
-  Example: With +150 odds, risking $100 wins $150
+IMPORTANT RULES FOR DETERMINING RISK vs TO WIN:
+1. FIRST PRIORITY: Look for explicit labels like "RISK:", "TO WIN:", "WAGER:", "BET:", "STAKE:", "PAYOUT:", "WIN:", etc.
+   - If you see "RISK: $210.00" and "TO WIN: $200.00", use those exact amounts
+   - Do NOT reverse or swap these amounts based on odds calculations
+   
+2. ONLY if no explicit labels are found, use the odds to infer:
+   - For negative odds (e.g., -180): The larger amount is the risk, smaller is the potential win
+   - For positive odds (e.g., +150): The smaller amount is the risk, larger is the potential win
 
-If the bet shows as "Won" or settled, the amounts shown are typically:
-- The amount that was risked
-- The profit/winnings (not including the original stake)
+3. For settled/won bets:
+   - The amounts shown are typically: amount risked and profit/winnings (not including stake)
+   - Look for labels like "WON:", "PAYOUT:", "PROFIT:" to identify winnings
 
 Return format:
 {
   "sportsbook": "name or null if unclear",
   "ticket_number": "extracted ticket/reference number",
   "type": "straight|parlay|teaser|round_robin|futures",
-  "odds": "+150 or -110 format",
+  "odds": "+150 or -110 format (MUST be American odds format: + for positive, - for negative, followed by a number)",
   "risk": 100.00,
   "to_win": 150.00,
   "status": "pending|won|lost|push|void",
@@ -57,6 +60,16 @@ Return format:
     }
   ]
 }
+
+CRITICAL ODDS FORMAT RULES:
+- ALWAYS return odds in American format: "+150", "-110", "+100", "-200"
+- NEVER return odds as fractions like "-$100/$290" or "100/290"
+- NEVER include dollar signs in odds
+- For even money bets, use "+100" or "-100"
+- If you see odds displayed as "risk $X to win $Y", calculate the American odds:
+  - If to_win > risk: odds = "+" + round((to_win/risk) * 100)
+  - If to_win < risk: odds = "-" + round((risk/to_win) * 100)
+  - If to_win = risk: odds = "+100"
 
 IMPORTANT for parsing totals:
 - "TOTAL o9-105" means "Over 9" at odds "-105"
@@ -79,6 +92,7 @@ For futures bets, use "Future: [description]" as the event name.`
   const content = result.content[0].text
   
   try {
+    // Try to parse the content directly first
     const parsed = JSON.parse(content)
     
     // Calculate odds if not provided (common for parlays)
@@ -95,7 +109,29 @@ For futures bets, use "Future: [description]" as the event name.`
     
     return parsed as BetData
   } catch (e) {
-    throw new Error(`Failed to parse AI response: ${content}`)
+    // If direct parsing fails, try to extract JSON from the text
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        
+        // Calculate odds if not provided
+        if (!parsed.odds && parsed.risk && parsed.to_win) {
+          const ratio = parsed.to_win / parsed.risk
+          if (ratio >= 1) {
+            parsed.odds = `+${Math.round(ratio * 100)}`
+          } else {
+            parsed.odds = `-${Math.round(100 / ratio)}`
+          }
+        }
+        
+        return parsed as BetData;
+      } catch (innerError) {
+        throw new Error(`Failed to parse AI response: ${content}`)
+      }
+    } else {
+      throw new Error(`Failed to parse AI response: ${content}`)
+    }
   }
 }
 

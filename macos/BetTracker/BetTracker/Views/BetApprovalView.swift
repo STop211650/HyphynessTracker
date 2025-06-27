@@ -252,6 +252,9 @@ struct BetApprovalView: View {
         }
         .padding()
         .frame(width: 850, height: 600)
+        .onEscapeKey {
+            onReject()
+        }
         .onAppear {
             loadScreenshot()
         }

@@ -1,11 +1,13 @@
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+// Setup type definitions for built-in Supabase Runtime APIs
+import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+
 import { corsHeaders } from '../_shared/cors.ts'
 import { supabase, getOrCreateParticipant } from '../_shared/supabase.ts'
 import { parseBetScreenshot } from '../_shared/vision.ts'
 import { parseParticipants, validateStakes } from '../_shared/participants.ts'
 import { AddBetRequest } from '../_shared/types.ts'
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   // Handle CORS
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -44,6 +46,31 @@ serve(async (req) => {
       betData = await parseBetScreenshot(screenshot)
     }
     console.log('Bet data:', JSON.stringify(betData, null, 2))
+    
+    // Validate and normalize odds format
+    if (betData.odds) {
+      // Check if odds are in incorrect format (e.g., "-$100/$290")
+      if (betData.odds.includes('$') || betData.odds.includes('/')) {
+        console.log(`Invalid odds format detected: ${betData.odds}`)
+        // Calculate correct odds from risk/to_win
+        if (betData.risk && betData.to_win) {
+          const ratio = betData.to_win / betData.risk
+          if (ratio > 1) {
+            betData.odds = `+${Math.round(ratio * 100)}`
+          } else if (ratio < 1) {
+            betData.odds = `-${Math.round(100 / ratio)}`
+          } else {
+            betData.odds = '+100'
+          }
+          console.log(`Corrected odds to: ${betData.odds}`)
+        }
+      }
+      // Ensure odds start with + or -
+      else if (!betData.odds.startsWith('+') && !betData.odds.startsWith('-')) {
+        betData.odds = `+${betData.odds}`
+        console.log(`Added + prefix to odds: ${betData.odds}`)
+      }
+    }
     
     // Normalize status to valid values
     const validStatuses = ['pending', 'won', 'lost', 'void', 'push']
@@ -126,6 +153,21 @@ serve(async (req) => {
       .single()
 
     if (betError) {
+      // Check for duplicate ticket number (unique constraint violation)
+      if (betError.code === '23505') {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `A bet with ticket number ${betData.ticket_number} already exists`,
+            isDuplicate: true,
+            ticket_number: betData.ticket_number
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 409
+          }
+        )
+      }
       throw new Error(`Failed to create bet: ${betError.message}`)
     }
 

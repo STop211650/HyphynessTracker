@@ -13,6 +13,11 @@ struct ManualBetEntryView: View {
     @State private var isProcessing = false
     @State private var errorMessage = ""
     @State private var showError = false
+    @FocusState private var focusedField: Field?
+    
+    enum Field: Hashable {
+        case ticketNumber
+    }
     
     let onSubmit: (String, BetData) -> Void
     let onCancel: () -> Void
@@ -39,6 +44,7 @@ struct ManualBetEntryView: View {
             Form {
                 Section("Bet Details") {
                     TextField("Ticket Number", text: $ticketNumber)
+                        .focused($focusedField, equals: .ticketNumber)
                     TextField("Sportsbook (optional)", text: $sportsbook)
                     
                     Picker("Bet Type", selection: $betType) {
@@ -127,6 +133,15 @@ struct ManualBetEntryView: View {
             .padding(.bottom)
         }
         .frame(width: 500, height: 600)
+        .onAppear {
+            // Focus the first text field after a short delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                focusedField = .ticketNumber
+            }
+        }
+        .onEscapeKey {
+            onCancel()
+        }
         .sheet(isPresented: $showingLegEntry) {
             LegEntryView { leg in
                 legs.append(leg)

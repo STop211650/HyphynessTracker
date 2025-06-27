@@ -9,14 +9,19 @@ class AuthenticationManager: ObservableObject {
     
     private let keychainService = "com.bettracker.auth"
     private let keychainAccount = "supabase-auth-token"
-    private let supabaseURL = "https://anxncoikpbipuplrkqrd.supabase.co"
-    private let supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFueG5jb2lrcGJpcHVwbHJrcXJkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk3ODY1OTMsImV4cCI6MjA2NTM2MjU5M30.gMAaJ1h7ZmiSbaInhNgYNCsJhLj8SljiawkDyWlYrGQ"
+    private var supabaseURL: String { Config.supabaseURL }
+    private var supabaseAnonKey: String { Config.supabaseAnonKey }
     
     private init() {
         // Check for existing auth token on launch
-        if let _ = getStoredAuthToken() {
-            isAuthenticated = true
-            // TODO: Validate token with Supabase
+        if let token = getStoredAuthToken() {
+            // Validate token expiration
+            if isTokenValid(token) {
+                isAuthenticated = true
+            } else {
+                // Token expired, clean up
+                signOut()
+            }
         }
     }
     
@@ -125,6 +130,45 @@ class AuthenticationManager: ObservableObject {
         ]
         
         SecItemDelete(query as CFDictionary)
+    }
+    
+    // Validate JWT token expiration
+    func isTokenValid(_ token: String) -> Bool {
+        // Split JWT into parts
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return false }
+        
+        // Decode the payload (second part)
+        let payload = String(parts[1])
+        
+        // Add padding if needed
+        let remainder = payload.count % 4
+        let paddedPayload = payload + String(repeating: "=", count: remainder == 0 ? 0 : 4 - remainder)
+        
+        guard let payloadData = Data(base64Encoded: paddedPayload),
+              let json = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+              let exp = json["exp"] as? TimeInterval else {
+            return false
+        }
+        
+        // Check if token is expired
+        let expirationDate = Date(timeIntervalSince1970: exp)
+        return expirationDate > Date()
+    }
+    
+    // Validate current stored token
+    func validateStoredToken() -> Bool {
+        guard let token = getStoredAuthToken() else {
+            return false
+        }
+        
+        if isTokenValid(token) {
+            return true
+        } else {
+            // Token expired, sign out
+            signOut()
+            return false
+        }
     }
 }
 

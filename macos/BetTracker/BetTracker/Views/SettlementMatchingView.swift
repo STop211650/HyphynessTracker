@@ -113,6 +113,9 @@ struct SettlementMatchingView: View {
         }
         .padding()
         .frame(width: 700, height: 600)
+        .onEscapeKey {
+            onCancel()
+        }
     }
     
     var statusColor: Color {
@@ -160,9 +163,11 @@ struct MatchRow: View {
                         Text(String(format: "$%.2f", match.bet_data.risk) + " @ \(match.bet_data.odds)")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        Text(formatDate(match.created_at))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        if let createdAt = match.created_at {
+                            Text(formatDate(createdAt))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 

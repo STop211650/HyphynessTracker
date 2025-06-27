@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BetDetailsInputView: View {
     let screenshotPath: String
+    let parsedBetData: BetData?
     let onContinue: (String) -> Void
     let onCancel: () -> Void
     
@@ -10,12 +11,31 @@ struct BetDetailsInputView: View {
     @State private var errorMessage = ""
     @FocusState private var isTextFieldFocused: Bool
     
+    init(screenshotPath: String, parsedBetData: BetData? = nil, onContinue: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+        self.screenshotPath = screenshotPath
+        self.parsedBetData = parsedBetData
+        self.onContinue = onContinue
+        self.onCancel = onCancel
+    }
+    
     var body: some View {
         VStack(spacing: 20) {
             // Title
-            Text("Who's in on this bet?")
+            Text(titleText)
                 .font(.title2)
                 .bold()
+            
+            // Show bet status if settled
+            if let betData = parsedBetData, betData.status.lowercased() != "pending" {
+                HStack {
+                    Text("Status:")
+                        .foregroundColor(.secondary)
+                    Text(betData.status.capitalized)
+                        .foregroundColor(statusColor(for: betData.status))
+                        .bold()
+                }
+                .font(.subheadline)
+            }
             
             // Instructions
             Text("Enter participants and their stakes")
@@ -30,6 +50,9 @@ struct BetDetailsInputView: View {
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("• Sam, Alex, Jordan split equally")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("• Sam 50 Alex 30 Jordan 20")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     Text("• Sam 50, Alex 30, Jordan 20")
@@ -82,6 +105,9 @@ struct BetDetailsInputView: View {
         }
         .padding()
         .frame(width: 400, height: 300)
+        .onEscapeKey {
+            onCancel()
+        }
         .onAppear {
             // Focus the text field when view appears
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -108,5 +134,28 @@ struct BetDetailsInputView: View {
         isProcessing = true
         errorMessage = ""
         onContinue(trimmed)
+    }
+    
+    private var titleText: String {
+        if let betData = parsedBetData, betData.status.lowercased() != "pending" {
+            return "Who was in on this bet?"
+        } else {
+            return "Who's in on this bet?"
+        }
+    }
+    
+    private func statusColor(for status: String) -> Color {
+        switch status.lowercased() {
+        case "won":
+            return .green
+        case "lost":
+            return .red
+        case "push":
+            return .orange
+        case "void":
+            return .gray
+        default:
+            return .primary
+        }
     }
 }

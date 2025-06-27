@@ -99,6 +99,9 @@ struct AuthenticationView: View {
         }
         .padding()
         .frame(width: 350, height: 320)
+        .onEscapeKey {
+            onDismiss()
+        }
     }
     
     private func signIn() {

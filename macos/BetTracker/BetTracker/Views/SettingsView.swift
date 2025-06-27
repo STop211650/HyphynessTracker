@@ -39,6 +39,12 @@ struct SettingsView: View {
                 .tag("about")
         }
         .frame(width: 500, height: 400)
+        .onEscapeKey {
+            // For settings, we just close the window
+            if let window = NSApp.keyWindow {
+                window.close()
+            }
+        }
         .sheet(isPresented: $showingFolderPicker) {
             FolderPickerView(selectedPath: $screenshotLocation)
         }
@@ -79,25 +85,31 @@ struct GeneralSettingsView: View {
             }
             
             Section {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text("Keyboard Shortcuts")
                         .font(.headline)
+                        .padding(.bottom, 4)
                     
-                    HStack {
-                        Text("Take Screenshot:")
-                        Spacer()
-                        Text("⌘⇧S")
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundColor(.secondary)
+                    // Display all shortcuts from AppShortcut
+                    ForEach(AppShortcut.allShortcuts.indices, id: \.self) { index in
+                        let shortcut = AppShortcut.allShortcuts[index]
+                        HStack {
+                            Text(shortcut.description + ":")
+                            Spacer()
+                            Text(shortcut.displayString)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color.gray.opacity(0.1))
+                                .cornerRadius(4)
+                        }
                     }
                     
-                    HStack {
-                        Text("Open Settings:")
-                        Spacer()
-                        Text("⌘,")
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundColor(.secondary)
-                    }
+                    Text("Global shortcuts use Option+Shift (⌥⇧) to avoid conflicts with other apps.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
                 }
                 .padding(.vertical, 8)
             }
